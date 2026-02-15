@@ -1,135 +1,210 @@
 /*
-    BLE Device for testing the bt CLI tool
-    - Advertises a BLE service with read/write characteristics
-    - Displays written values on OLED
-    - Allows reading counter value
-*/
+ * BLE Test Peripheral for bt.py (with OLED display)
+ * 
+ * Board: ESP32 (install "esp32" board package in Arduino IDE)
+ * Libraries needed:
+ *   - Adafruit SSD1306  (Library Manager -> search "Adafruit SSD1306")
+ *   - Adafruit GFX      (installed automatically with SSD1306)
+ *
+ * Wiring (SSD1306 I2C OLED):
+ *   SDA -> GPIO 21
+ *   SCL -> GPIO 22
+ *   VCC -> 3.3V
+ *   GND -> GND
+ *
+ * Usage:
+ *   1. Flash this to your ESP32
+ *   2. Run: uv run .\bt.py scan
+ *   3. Select "BT_Test" from the device list
+ *   4. Write a message -> it appears on the OLED
+ *   5. Listen -> see tick notifications every 2 seconds
+ */
 
 #include <BLEDevice.h>
-#include <BLEUtils.h>
 #include <BLEServer.h>
+#include <BLEUtils.h>
 #include <BLE2902.h>
-
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+// OLED config
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-#define OLED_RESET    -1 
-#define SCREEN_ADDRESS 0x3C
+#define OLED_RESET -1
+#define OLED_ADDR 0x3C
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Service and characteristic UUIDs
-#define SERVICE_UUID           "89c52e89-c665-4378-a274-e08065ee12e3"
-#define WRITE_CHAR_UUID        "16d4d7fa-58a5-4672-b363-d73c680a9f85"
-#define READ_CHAR_UUID         "26d4d7fa-58a5-4672-b363-d73c680a9f86"
-#define NOTIFY_CHAR_UUID       "36d4d7fa-58a5-4672-b363-d73c680a9f87"
+// UUIDs
+#define SERVICE_UUID        "89c52e89-c665-4378-a274-e08065ee12e3"
+#define CHAR_WRITE_UUID     "16d4d7fa-58a5-4672-b363-d73c680a9f85"
+#define CHAR_READ_UUID      "26d4d7fa-58a5-4672-b363-d73c680a9f86"
+#define CHAR_NOTIFY_UUID    "36d4d7fa-58a5-4672-b363-d73c680a9f87"
 
-int counter = 0;
-String lastWritten = "Ready to receive";
-BLECharacteristic *pNotifyChar = nullptr;
+BLEServer* pServer = NULL;
+BLECharacteristic* pWriteChar = NULL;
+BLECharacteristic* pReadChar = NULL;
+BLECharacteristic* pNotifyChar = NULL;
 
-class WriteCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic) {
-    String value = pCharacteristic->getValue();
-    if (value.length() > 0) {
-      lastWritten = value;
-      Serial.print("Written: ");
-      Serial.println(value);
-      
-      // Update OLED
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.println("BT Write Received:");
-      display.println(value);
-      display.println("");
-      display.print("Counter: ");
-      display.println(counter);
-      display.display();
-      
-      // Send notification
-      if (pNotifyChar) {
-        pNotifyChar->setValue((uint8_t *)value.c_str(), value.length());
-        pNotifyChar->notify();
-      }
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+uint32_t counter = 0;
+String lastWritten = "hello";
+String statusLine = "Waiting...";
+String deviceName = "GitHub Copilot";
+
+unsigned long lastNotifyTime = 0;
+const unsigned long NOTIFY_INTERVAL = 2000;
+
+// --- Update OLED display ---
+void updateDisplay(String line1, String line2 = "", String line3 = "") {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    
+    // Header
+    display.setCursor(0, 0);
+    display.println("== " + deviceName + "==");
+    display.drawLine(0, 10, SCREEN_WIDTH, 10, SSD1306_WHITE);
+    
+    // Status
+    display.setCursor(0, 14);
+    display.println(deviceConnected ? "Connected" : "Advertising...");
+    
+    // Content lines
+    display.setCursor(0, 28);
+    display.println(line1);
+    
+    if (line2.length() > 0) {
+        display.setCursor(0, 40);
+        display.println(line2);
     }
-  }
+    
+    if (line3.length() > 0) {
+        display.setCursor(0, 52);
+        display.println(line3);
+    }
+    
+    display.display();
+}
+
+// --- Connection callbacks ---
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+        Serial.println(">> Client connected!");
+        updateDisplay("Client connected!");
+    }
+
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+        Serial.println(">> Client disconnected.");
+        updateDisplay("Disconnected.", "Restarting ads...");
+    }
 };
 
-class ReadCallbacks : public BLECharacteristicCallbacks {
-  void onRead(BLECharacteristic *pCharacteristic) {
-    counter++;
-    String counterStr = String(counter);
-    pCharacteristic->setValue((uint8_t *)counterStr.c_str(), counterStr.length());
-    Serial.print("Read: ");
-    Serial.println(counterStr);
-  }
+// --- Write callback ---
+class WriteCallbacks : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic* pCharacteristic) {
+        String value = pCharacteristic->getValue().c_str();
+        if (value.length() > 0) {
+            Serial.print(">> Received write: ");
+            Serial.println(value);
+            
+            // Store for READ echo
+            lastWritten = value;
+            pReadChar->setValue(lastWritten.c_str());
+            
+            // Show on OLED
+            updateDisplay("WRITE received:", value);
+        }
+    }
 };
 
 void setup() {
-  Serial.begin(115200);
-  delay(100);
-  
-  // Initialize I2C for OLED
-  Wire.begin(D4, D5);
-  
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("OLED failed"));
-    for(;;);
-  }
-  
-  // Show startup message
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println("BLE Device Ready");
-  display.println("Service: test-ble");
-  display.println("");
-  display.println("Scanning for bt CLI...");
-  display.display();
-  
-  // Initialize BLE
-  BLEDevice::init("test-ble");
-  BLEServer *pServer = BLEDevice::createServer();
-  
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  
-  // Write characteristic
-  BLECharacteristic *pWriteChar = pService->createCharacteristic(
-    WRITE_CHAR_UUID,
-    BLECharacteristic::PROPERTY_WRITE
-  );
-  pWriteChar->setCallbacks(new WriteCallbacks());
-  
-  // Read characteristic
-  BLECharacteristic *pReadChar = pService->createCharacteristic(
-    READ_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ
-  );
-  pReadChar->setCallbacks(new ReadCallbacks());
-  pReadChar->setValue("0");
-  
-  // Notify characteristic
-  pNotifyChar = pService->createCharacteristic(
-    NOTIFY_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pNotifyChar->addDescriptor(new BLE2902());
-  pNotifyChar->setValue("waiting...");
-  
-  pService->start();
-  
-  BLEAdvertising *pAdvertising = pServer->getAdvertising();
-  pAdvertising->start();
-  
-  Serial.println("BLE advertising started");
+    Serial.begin(115200);
+    Serial.println("\n=== " + deviceName + "===");
+
+    // Init OLED
+    if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+        Serial.println("OLED init failed!");
+    }
+    updateDisplay("Starting BLE...");
+
+    // Init BLE
+    BLEDevice::init(deviceName);
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+
+    // Create service
+    BLEService* pService = pServer->createService(SERVICE_UUID);
+
+    // WRITE characteristic
+    pWriteChar = pService->createCharacteristic(
+        CHAR_WRITE_UUID,
+        BLECharacteristic::PROPERTY_WRITE
+    );
+    pWriteChar->setCallbacks(new WriteCallbacks());
+
+    // READ characteristic
+    pReadChar = pService->createCharacteristic(
+        CHAR_READ_UUID,
+        BLECharacteristic::PROPERTY_READ
+    );
+    pReadChar->setValue(lastWritten.c_str());
+
+    // NOTIFY characteristic
+    pNotifyChar = pService->createCharacteristic(
+        CHAR_NOTIFY_UUID,
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+    pNotifyChar->addDescriptor(new BLE2902());
+
+    // Start
+    pService->start();
+    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+
+    Serial.println("BLE ready! Advertising as '" + deviceName +"'");
+    updateDisplay("Advertising...", "Name: " + deviceName);
 }
 
 void loop() {
-  delay(1000);
-}
+    if (deviceConnected) {
+        unsigned long now = millis();
+        if (now - lastNotifyTime >= NOTIFY_INTERVAL) {
+            lastNotifyTime = now;
+            counter++;
 
+            String msg = "tick:" + String(counter);
+            pNotifyChar->setValue(msg.c_str());
+            pNotifyChar->notify();
+
+            Serial.print("<< Sent notify: ");
+            Serial.println(msg);
+            
+            // Show on OLED
+            updateDisplay("NOTIFY sent:", msg, "Last write: " + lastWritten);
+        }
+    }
+
+    // Handle reconnection
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500);
+        pServer->startAdvertising();
+        Serial.println("Restarted advertising...");
+        updateDisplay("Advertising...", "Name: " + deviceName);
+        oldDeviceConnected = false;
+    }
+
+    if (deviceConnected && !oldDeviceConnected) {
+        oldDeviceConnected = true;
+    }
+
+    delay(10);
+}

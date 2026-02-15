@@ -24,7 +24,7 @@ A beautiful, interactive command-line tool for scanning, connecting to, and comm
 ### Setup
 
 ```bash
-git clone https://github.com/yourusername/bt.git
+git clone https://github.com/qainsights/bt.git
 cd bt
 
 # Install dependencies

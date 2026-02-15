@@ -5,7 +5,7 @@ description = "A modern CLI for scanning and interacting with Bluetooth devices"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-  "typer[all]>=0.9",
+  "typer>=0.9",
   "rich>=13.0",
   "bleak>=0.21",
   "questionary>=2.0",
@@ -17,3 +17,15 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 bt = "bt:main"
+
+[tool.setuptools]
+py-modules = [
+  "ble",
+  "bt",
+  "dashboard",
+  "gatt_uuids",
+  "packet_logger",
+  "rssi_monitor",
+  "security_audit",
+  "test_cli",
+]

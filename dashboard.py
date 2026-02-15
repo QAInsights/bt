@@ -351,3 +351,7 @@ def start_dashboard(host: str = "0.0.0.0", port: int = 8080):
         asyncio.run(start_dashboard_async(host, port))
     except KeyboardInterrupt:
         print("\n  Dashboard stopped.")
+
+
+if __name__ == "__main__":
+    start_dashboard()

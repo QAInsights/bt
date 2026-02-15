@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE Dashboard — Real-Time Bluetooth Monitor</title>
+    <meta name="description" content="Real-time BLE device scanner, GATT explorer, and security auditor">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: rgba(17, 24, 39, 0.8);
+            --bg-card-hover: rgba(30, 41, 59, 0.8);
+            --border: rgba(99, 102, 241, 0.15);
+            --border-hover: rgba(99, 102, 241, 0.4);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-dim: #64748b;
+            --accent: #6366f1;
+            --accent-glow: rgba(99, 102, 241, 0.3);
+            --green: #22c55e;
+            --green-glow: rgba(34, 197, 94, 0.2);
+            --yellow: #eab308;
+            --orange: #f97316;
+            --red: #ef4444;
+            --cyan: #06b6d4;
+            --purple: #a855f7;
+            --gradient-1: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+            --gradient-card: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Background effects */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 30% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+                        radial-gradient(circle at 50% 50%, rgba(6, 182, 212, 0.04) 0%, transparent 50%);
+            z-index: -1;
+            animation: bgPulse 15s ease-in-out infinite alternate;
+        }
+
+        @keyframes bgPulse {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(-2%, -1%) scale(1.02); }
+        }
+
+        /* Header */
+        .header {
+            padding: 20px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(20px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 14, 23, 0.85);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-icon {
+            font-size: 28px;
+            filter: drop-shadow(0 0 8px var(--accent-glow));
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 100px;
+            font-size: 13px;
+            font-weight: 500;
+            background: var(--green-glow);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: var(--green);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 24px;
+        }
+
+        .header-stat {
+            text-align: center;
+        }
+
+        .header-stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-primary);
+        }
+
+        .header-stat-label {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Main Layout */
+        .main {
+            padding: 24px 32px;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            grid-template-rows: auto auto 1fr;
+            gap: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            backdrop-filter: blur(20px);
+            overflow: hidden;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: var(--border-hover);
+            box-shadow: 0 0 30px rgba(99, 102, 241, 0.05);
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            background: var(--gradient-card);
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-body {
+            padding: 16px 20px;
+        }
+
+        /* Device List */
+        .devices-card {
+            grid-column: 1;
+            grid-row: 1 / 3;
+        }
+
+        .device-list {
+            max-height: 600px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--accent) transparent;
+        }
+
+        .device-row {
+            display: grid;
+            grid-template-columns: 1fr 160px 200px 80px;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(99, 102, 241, 0.07);
+            transition: background 0.2s ease;
+            cursor: pointer;
+        }
+
+        .device-row:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .device-name {
+            font-weight: 500;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .device-name.unknown {
+            color: var(--text-dim);
+            font-style: italic;
+        }
+
+        .device-address {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .device-rssi-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .rssi-bar-track {
+            flex: 1;
+            height: 6px;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .rssi-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+
+        .rssi-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            min-width: 55px;
+            text-align: right;
+        }
+
+        .device-packets {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-dim);
+            text-align: right;
+        }
+
+        /* Signal Chart */
+        .chart-card {
+            grid-column: 1;
+            grid-row: 3;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 200px;
+            padding: 8px 0;
+        }
+
+        #signalChart {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Right Column */
+        .audit-card {
+            grid-column: 2;
+            grid-row: 1;
+        }
+
+        .logs-card {
+            grid-column: 2;
+            grid-row: 2 / 4;
+        }
+
+        /* Audit */
+        .audit-form {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .audit-input {
+            flex: 1;
+            padding: 10px 14px;
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .audit-input:focus {
+            border-color: var(--accent);
+        }
+
+        .audit-input::placeholder {
+            color: var(--text-dim);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: var(--gradient-1);
+            color: white;
+            box-shadow: 0 4px 15px var(--accent-glow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px var(--accent-glow);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+
+        /* Audit Score */
+        .audit-score {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            padding: 20px;
+            margin-top: 12px;
+        }
+
+        .score-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            border: 3px solid;
+            position: relative;
+        }
+
+        .score-value {
+            font-size: 22px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .score-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+
+        .audit-findings-summary {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .finding-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            padding: 4px 0;
+        }
+
+        .finding-count {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            min-width: 20px;
+        }
+
+        .finding-label {
+            color: var(--text-secondary);
+        }
+
+        /* Audit Detail */
+        .audit-detail {
+            max-height: 250px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+
+        .audit-finding-row {
+            padding: 10px 12px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            background: rgba(99, 102, 241, 0.04);
+            border-left: 3px solid;
+            font-size: 13px;
+        }
+
+        .audit-finding-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .audit-finding-desc {
+            color: var(--text-dim);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        /* Logs */
+        .log-list {
+            max-height: 400px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+
+        .log-entry {
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(99, 102, 241, 0.07);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 13px;
+        }
+
+        .log-entry:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .log-type-badge {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .log-type-session {
+            background: rgba(6, 182, 212, 0.15);
+            color: var(--cyan);
+        }
+
+        .log-type-audit {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--red);
+        }
+
+        .log-info {
+            flex: 1;
+        }
+
+        .log-device {
+            font-weight: 500;
+        }
+
+        .log-time {
+            font-size: 11px;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .log-packets {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-dim);
+        }
+
+        .empty-state-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 14px;
+        }
+
+        /* GATT Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+            z-index: 1;
+        }
+
+        .modal-title {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 20px 24px;
+        }
+
+        .gatt-service {
+            margin-bottom: 16px;
+        }
+
+        .gatt-service-header {
+            font-weight: 600;
+            font-size: 14px;
+            padding: 8px 12px;
+            background: rgba(99, 102, 241, 0.08);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .gatt-service-name {
+            color: var(--accent);
+        }
+
+        .gatt-char {
+            padding: 8px 12px 8px 24px;
+            border-left: 2px solid var(--border);
+            margin-left: 12px;
+            margin-bottom: 4px;
+        }
+
+        .gatt-char-name {
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .gatt-char-uuid {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .gatt-char-props {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .prop-badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .prop-read { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+        .prop-write { background: rgba(249, 115, 22, 0.15); color: var(--orange); }
+        .prop-notify { background: rgba(99, 102, 241, 0.15); color: var(--accent); }
+        .prop-indicate { background: rgba(168, 85, 247, 0.15); color: var(--purple); }
+
+        .gatt-char-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--cyan);
+            margin-top: 4px;
+            padding: 4px 8px;
+            background: rgba(6, 182, 212, 0.08);
+            border-radius: 4px;
+            word-break: break-all;
+        }
+
+        /* Device list header */
+        .device-list-header {
+            display: grid;
+            grid-template-columns: 1fr 160px 200px 80px;
+            padding: 8px 20px;
+            font-size: 11px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-in {
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            .main {
+                grid-template-columns: 1fr;
+                padding: 16px;
+            }
+            .devices-card, .chart-card, .audit-card, .logs-card {
+                grid-column: 1;
+                grid-row: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header" id="header">
+    <div class="header-left">
+        <span class="logo-icon">📶</span>
+        <span class="logo">BLE Dashboard</span>
+        <div class="status-badge">
+            <span class="status-dot"></span>
+            Scanning
+        </div>
+    </div>
+    <div class="header-stats">
+        <div class="header-stat">
+            <div class="header-stat-value" id="statDevices">0</div>
+            <div class="header-stat-label">Devices</div>
+        </div>
+        <div class="header-stat">
+            <div class="header-stat-value" id="statPackets">0</div>
+            <div class="header-stat-label">Packets</div>
+        </div>
+        <div class="header-stat">
+            <div class="header-stat-value" id="statUptime">0s</div>
+            <div class="header-stat-label">Uptime</div>
+        </div>
+    </div>
+</header>
+
+<!-- Main Content -->
+<main class="main">
+
+    <!-- Device List -->
+    <div class="card devices-card">
+        <div class="card-header">
+            <span class="card-title">📡 Nearby Devices</span>
+            <button class="btn btn-ghost" onclick="clearDevices()" style="padding: 6px 12px; font-size: 12px;">Clear</button>
+        </div>
+        <div class="device-list-header">
+            <span>Device</span>
+            <span>Address</span>
+            <span>Signal</span>
+            <span style="text-align:right">Pkts</span>
+        </div>
+        <div class="device-list" id="deviceList">
+            <div class="empty-state">
+                <div class="empty-state-icon">📡</div>
+                <div class="empty-state-text">Scanning for devices...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal Chart -->
+    <div class="card chart-card">
+        <div class="card-header">
+            <span class="card-title">📊 Signal Strength</span>
+            <span style="font-size: 12px; color: var(--text-dim);" id="chartLabel">Click a device to track</span>
+        </div>
+        <div class="card-body">
+            <div class="chart-container">
+                <canvas id="signalChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Audit -->
+    <div class="card audit-card">
+        <div class="card-header">
+            <span class="card-title">🔐 Security Audit</span>
+        </div>
+        <div class="card-body">
+            <div class="audit-form">
+                <input type="text" class="audit-input" id="auditAddress" placeholder="Device address or click device..." />
+                <button class="btn btn-primary" id="auditBtn" onclick="runAudit()">
+                    🔍 Audit
+                </button>
+            </div>
+            <div id="auditResult">
+                <div class="empty-state" style="padding: 20px;">
+                    <div class="empty-state-text">Select a device and run audit</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="card logs-card">
+        <div class="card-header">
+            <span class="card-title">📄 Session Logs</span>
+            <button class="btn btn-ghost" onclick="loadLogs()" style="padding: 6px 12px; font-size: 12px;">Refresh</button>
+        </div>
+        <div class="log-list" id="logList">
+            <div class="empty-state">
+                <div class="empty-state-icon">📄</div>
+                <div class="empty-state-text">Loading logs...</div>
+            </div>
+        </div>
+    </div>
+
+</main>
+
+<!-- GATT Modal -->
+<div class="modal-overlay" id="gattModal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title" id="modalTitle">GATT Services</span>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+
+<script>
+    // ─── State ───
+    let ws = null;
+    let devices = {};
+    let trackedDevice = null;
+    let startTime = Date.now();
+    let chartData = [];
+
+    // ─── WebSocket ───
+    function connectWS() {
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+        ws.onopen = () => console.log('WebSocket connected');
+        ws.onclose = () => {
+            console.log('WebSocket disconnected, reconnecting...');
+            setTimeout(connectWS, 2000);
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === 'devices') {
+                updateDevices(msg.data);
+            } else if (msg.type === 'audit_result') {
+                showAuditResult(msg.data);
+            } else if (msg.type === 'audit_status') {
+                if (msg.data.status === 'running') {
+                    document.getElementById('auditBtn').disabled = true;
+                    document.getElementById('auditBtn').innerHTML = '<span class="spinner"></span> Auditing...';
+                }
+            }
+        };
+    }
+
+    // ─── Device List ───
+    function updateDevices(data) {
+        const list = document.getElementById('deviceList');
+        const deviceArr = data.devices || [];
+
+        document.getElementById('statDevices').textContent = data.total || 0;
+        document.getElementById('statPackets').textContent = formatNumber(data.packets || 0);
+
+        // Update uptime
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        document.getElementById('statUptime').textContent = formatTime(elapsed);
+
+        if (deviceArr.length === 0) return;
+
+        // Store full data
+        deviceArr.forEach(d => { devices[d.address] = d; });
+
+        // Update chart if tracking
+        if (trackedDevice && devices[trackedDevice]) {
+            updateChart(devices[trackedDevice]);
+        }
+
+        let html = '';
+        deviceArr.forEach(d => {
+            const isTracked = d.address === trackedDevice;
+            const rssi = d.rssi || -100;
+            const pct = Math.max(0, Math.min(100, ((rssi + 100) / 70) * 100));
+            const color = rssiColor(rssi);
+            const nameClass = d.name === '<unknown>' ? 'device-name unknown' : 'device-name';
+            const border = isTracked ? `border-left: 3px solid ${color};` : '';
+
+            html += `
+                <div class="device-row" onclick="selectDevice('${d.address}')" style="${border}">
+                    <div>
+                        <div class="${nameClass}">${escapeHtml(d.name)}</div>
+                    </div>
+                    <div class="device-address">${d.address}</div>
+                    <div class="device-rssi-bar">
+                        <div class="rssi-bar-track">
+                            <div class="rssi-bar-fill" style="width: ${pct}%; background: ${color};"></div>
+                        </div>
+                        <span class="rssi-value" style="color: ${color};">${rssi} dBm</span>
+                    </div>
+                    <div class="device-packets">${d.packets}</div>
+                </div>
+            `;
+        });
+
+        list.innerHTML = html;
+    }
+
+    function selectDevice(address) {
+        trackedDevice = address;
+        chartData = [];
+        document.getElementById('auditAddress').value = address;
+        const dev = devices[address];
+        document.getElementById('chartLabel').textContent = dev ? `${dev.name} (${address})` : address;
+
+        // Double-click or shift-click to explore GATT
+        exploreGATT(address);
+    }
+
+    function clearDevices() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ cmd: 'clear_devices' }));
+        }
+        devices = {};
+        document.getElementById('deviceList').innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📡</div>
+                <div class="empty-state-text">Cleared. Scanning for devices...</div>
+            </div>
+        `;
+    }
+
+    // ─── Signal Chart ───
+    function updateChart(device) {
+        const canvas = document.getElementById('signalChart');
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        const history = device.rssi_history || [];
+        if (history.length < 2) return;
+
+        const w = canvas.width;
+        const h = canvas.height;
+        const padding = { top: 20, bottom: 30, left: 50, right: 20 };
+        const plotW = w - padding.left - padding.right;
+        const plotH = h - padding.top - padding.bottom;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Grid
+        const gridLines = [-30, -50, -70, -90];
+        ctx.strokeStyle = 'rgba(99, 102, 241, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.font = '11px JetBrains Mono, monospace';
+        ctx.fillStyle = '#64748b';
+        ctx.textAlign = 'right';
+
+        gridLines.forEach(val => {
+            const y = padding.top + ((val + 100) / -70) * -plotH + plotH;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(w - padding.right, y);
+            ctx.stroke();
+            ctx.fillText(`${val}`, padding.left - 8, y + 4);
+        });
+
+        // Draw signal line
+        const gradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+        gradient.addColorStop(0, 'rgba(34, 197, 94, 0.8)');
+        gradient.addColorStop(0.5, 'rgba(234, 179, 8, 0.8)');
+        gradient.addColorStop(1, 'rgba(239, 68, 68, 0.8)');
+
+        ctx.beginPath();
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+
+        history.forEach((rssi, i) => {
+            const x = padding.left + (i / (history.length - 1)) * plotW;
+            const y = padding.top + ((-rssi - 30) / 70) * plotH;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Fill area under curve
+        const fillGrad = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+        fillGrad.addColorStop(0, 'rgba(34, 197, 94, 0.15)');
+        fillGrad.addColorStop(0.5, 'rgba(234, 179, 8, 0.1)');
+        fillGrad.addColorStop(1, 'rgba(239, 68, 68, 0.05)');
+
+        ctx.lineTo(padding.left + plotW, h - padding.bottom);
+        ctx.lineTo(padding.left, h - padding.bottom);
+        ctx.closePath();
+        ctx.fillStyle = fillGrad;
+        ctx.fill();
+
+        // Current value dot
+        const lastRSSI = history[history.length - 1];
+        const dotX = padding.left + plotW;
+        const dotY = padding.top + ((-lastRSSI - 30) / 70) * plotH;
+        const dotColor = rssiColor(lastRSSI);
+
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 5, 0, Math.PI * 2);
+        ctx.fillStyle = dotColor;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 8, 0, Math.PI * 2);
+        ctx.strokeStyle = dotColor;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = dotColor;
+        ctx.font = 'bold 13px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${lastRSSI} dBm`, dotX - 14, dotY - 12);
+    }
+
+    // ─── GATT Explorer ───
+    async function exploreGATT(address) {
+        const modal = document.getElementById('gattModal');
+        const body = document.getElementById('modalBody');
+        const title = document.getElementById('modalTitle');
+
+        title.textContent = `GATT Services — ${address}`;
+        body.innerHTML = '<div class="empty-state"><span class="spinner" style="border-color: rgba(99,102,241,0.2); border-top-color: var(--accent);"></span><p style="margin-top: 12px; color: var(--text-dim);">Connecting & reading services...</p></div>';
+        modal.classList.add('active');
+
+        try {
+            const resp = await fetch('/api/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address }),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                body.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-text">${escapeHtml(err.error || 'Connection failed')}</div></div>`;
+                return;
+            }
+
+            const data = await resp.json();
+            renderGATT(data, body);
+        } catch (e) {
+            body.innerHTML = `<div class="empty-state"><div class="empty-state-icon">⚠️</div><div class="empty-state-text">${escapeHtml(e.message)}</div></div>`;
+        }
+    }
+
+    function renderGATT(data, container) {
+        let html = '';
+        const services = data.services || {};
+
+        for (const [svcUuid, svc] of Object.entries(services)) {
+            const svcName = svc.name !== 'Unknown Service' ? svc.name : '';
+            html += `<div class="gatt-service">`;
+            html += `<div class="gatt-service-header">
+                📦 <span class="gatt-service-name">${svcName ? escapeHtml(svcName) + ' — ' : ''}</span>
+                <span style="font-family: JetBrains Mono; font-size: 11px; color: var(--text-dim);">${svcUuid}</span>
+            </div>`;
+
+            const chars = svc.characteristics || {};
+            for (const [charUuid, ch] of Object.entries(chars)) {
+                const charName = ch.name !== 'Unknown' ? ch.name : '';
+                html += `<div class="gatt-char">`;
+                html += `<div class="gatt-char-name">${charName ? '📎 ' + escapeHtml(charName) : '📎 Custom Characteristic'}</div>`;
+                html += `<div class="gatt-char-uuid">${charUuid}</div>`;
+
+                // Properties
+                html += `<div class="gatt-char-props">`;
+                (ch.properties || []).forEach(p => {
+                    let cls = 'prop-badge';
+                    if (p.includes('read')) cls += ' prop-read';
+                    else if (p.includes('write')) cls += ' prop-write';
+                    else if (p === 'notify') cls += ' prop-notify';
+                    else if (p === 'indicate') cls += ' prop-indicate';
+                    html += `<span class="${cls}">${p}</span>`;
+                });
+                html += `</div>`;
+
+                // Value
+                if (ch.value !== null && ch.value !== undefined) {
+                    html += `<div class="gatt-char-value">→ ${escapeHtml(String(ch.value))}</div>`;
+                }
+
+                html += `</div>`;
+            }
+
+            html += `</div>`;
+        }
+
+        container.innerHTML = html || '<div class="empty-state">No services found</div>';
+    }
+
+    function closeModal() {
+        document.getElementById('gattModal').classList.remove('active');
+    }
+
+    // ─── Security Audit ───
+    async function runAudit() {
+        const address = document.getElementById('auditAddress').value.trim();
+        if (!address) {
+            alert('Enter a device address first');
+            return;
+        }
+
+        const btn = document.getElementById('auditBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Auditing...';
+
+        try {
+            const resp = await fetch('/api/audit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address }),
+            });
+
+            const data = await resp.json();
+            if (resp.ok) {
+                showAuditResult(data);
+            } else {
+                document.getElementById('auditResult').innerHTML = `
+                    <div class="empty-state"><div class="empty-state-text" style="color: var(--red);">❌ ${escapeHtml(data.error)}</div></div>
+                `;
+            }
+        } catch (e) {
+            document.getElementById('auditResult').innerHTML = `
+                <div class="empty-state"><div class="empty-state-text" style="color: var(--red);">❌ ${escapeHtml(e.message)}</div></div>
+            `;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔍 Audit';
+        }
+    }
+
+    function showAuditResult(data) {
+        const container = document.getElementById('auditResult');
+        const score = data.score ?? 0;
+        const grade = data.grade || 'F';
+        const findings = data.findings || [];
+
+        const gradeColor = {
+            'A+': 'var(--green)', 'A': 'var(--green)',
+            'B+': 'var(--cyan)', 'B': 'var(--cyan)',
+            'C': 'var(--yellow)',
+            'D': 'var(--orange)',
+            'F': 'var(--red)'
+        }[grade] || 'var(--red)';
+
+        const sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
+        findings.forEach(f => { sevCounts[f.severity] = (sevCounts[f.severity] || 0) + 1; });
+
+        const sevColors = {
+            CRITICAL: 'var(--red)', HIGH: 'var(--orange)',
+            MEDIUM: 'var(--yellow)', LOW: 'var(--cyan)', INFO: 'var(--text-dim)'
+        };
+
+        const sevIcons = { CRITICAL: '🔴', HIGH: '🟠', MEDIUM: '🟡', LOW: '🔵', INFO: '⚪' };
+
+        let html = `
+            <div class="audit-score">
+                <div class="score-circle" style="border-color: ${gradeColor};">
+                    <div class="score-value" style="color: ${gradeColor};">${grade}</div>
+                    <div class="score-label">${score.toFixed(1)}/10</div>
+                </div>
+                <div class="audit-findings-summary">
+        `;
+
+        for (const [sev, count] of Object.entries(sevCounts)) {
+            if (count > 0) {
+                html += `
+                    <div class="finding-badge">
+                        <span>${sevIcons[sev]}</span>
+                        <span class="finding-count" style="color: ${sevColors[sev]}">${count}</span>
+                        <span class="finding-label">${sev}</span>
+                    </div>
+                `;
+            }
+        }
+
+        html += `</div></div>`;
+
+        // Finding details
+        if (findings.length > 0) {
+            html += `<div class="audit-detail">`;
+            findings.forEach(f => {
+                const borderColor = sevColors[f.severity] || 'var(--text-dim)';
+                html += `
+                    <div class="audit-finding-row" style="border-color: ${borderColor};">
+                        <div class="audit-finding-title">${sevIcons[f.severity]} ${escapeHtml(f.title)}</div>
+                        <div class="audit-finding-desc">${escapeHtml(f.description)}</div>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
+
+        container.innerHTML = html;
+
+        // Reset button
+        const btn = document.getElementById('auditBtn');
+        btn.disabled = false;
+        btn.innerHTML = '🔍 Audit';
+    }
+
+    // ─── Logs ───
+    async function loadLogs() {
+        try {
+            const resp = await fetch('/api/logs');
+            const data = await resp.json();
+            const list = document.getElementById('logList');
+
+            if (!data.logs || data.logs.length === 0) {
+                list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📄</div><div class="empty-state-text">No logs yet</div></div>';
+                return;
+            }
+
+            let html = '';
+            data.logs.forEach(log => {
+                const typeCls = log.type === 'audit' ? 'log-type-audit' : 'log-type-session';
+                const devName = log.device?.name || log.device?.address || log.filename;
+                const time = log.timestamp ? new Date(log.timestamp).toLocaleString() : '';
+
+                html += `
+                    <div class="log-entry" onclick="viewLog('${escapeHtml(log.filename)}')">
+                        <span class="log-type-badge ${typeCls}">${log.type}</span>
+                        <div class="log-info">
+                            <div class="log-device">${escapeHtml(devName)}</div>
+                            <div class="log-time">${time}</div>
+                        </div>
+                        <div class="log-packets">${log.packets || ''}</div>
+                    </div>
+                `;
+            });
+
+            list.innerHTML = html;
+        } catch (e) {
+            console.error('Failed to load logs', e);
+        }
+    }
+
+    async function viewLog(filename) {
+        try {
+            const resp = await fetch(`/api/logs/${filename}`);
+            const data = await resp.json();
+
+            const modal = document.getElementById('gattModal');
+            const body = document.getElementById('modalBody');
+            const title = document.getElementById('modalTitle');
+
+            title.textContent = `📄 ${filename}`;
+            body.innerHTML = `<pre style="font-family: JetBrains Mono, monospace; font-size: 12px; color: var(--text-secondary); white-space: pre-wrap; line-height: 1.6;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+            modal.classList.add('active');
+        } catch (e) {
+            console.error('Failed to view log', e);
+        }
+    }
+
+    // ─── Helpers ───
+    function rssiColor(rssi) {
+        if (rssi >= -50) return 'var(--green)';
+        if (rssi >= -65) return '#22c55e';
+        if (rssi >= -75) return 'var(--yellow)';
+        if (rssi >= -85) return 'var(--orange)';
+        return 'var(--red)';
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+
+    function formatNumber(n) {
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+        return String(n);
+    }
+
+    function formatTime(seconds) {
+        if (seconds < 60) return seconds + 's';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+        return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+    }
+
+    // Close modal on overlay click
+    document.getElementById('gattModal').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal();
+    });
+
+    // ─── Init ───
+    connectWS();
+    loadLogs();
+</script>
+
+</body>
+</html>

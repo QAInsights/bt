@@ -345,6 +345,16 @@ def web(port: int = typer.Option(8080, "--port", "-p", help="Port for the web da
     console.print(f"  [dim]Open your browser at[/dim] [bold]http://localhost:{port}[/bold]")
     start_dashboard(port=port)
 
+@app.command()
+def version():
+    """Show version information."""
+    console.print("[bold cyan]BT v2026.0.1[/bold cyan]")
+    console.print("A versatile Bluetooth Low Energy (BLE) exploration and security auditing tool.")
+    show_author()
+
+def show_author():
+    console.print("\nCreated by [bold]NaveenKumar Namachivayam[/bold].")
+    console.print("[dim]GitHub:https://github.com/qainsights/bt[/dim]")
 
 def main():
     app()
